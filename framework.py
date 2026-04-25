@@ -23,7 +23,7 @@ def search_github(
     query: str,
     lang: str = "python",
     max_results: int = 5,
-    fallback_to_curated: bool = True,
+    fallback_to_curated: bool = False,
     token: str | None = None
 ) -> list[dict]:
     """
@@ -323,7 +323,7 @@ def extract_function(code: str, func_name: str, slices: list[dict]) -> str | Non
             logger.error(f"Non-integer line bounds for '{func_name}': start={raw_start}, end={raw_end}")
             return None
 
-        line_start = raw_start - 1  # Convert to 0-indexed
+        line_start = raw_start
         line_end = raw_end
 
         # --- Bounds validation ---
