@@ -1,5 +1,6 @@
 import logging
 import requests
+import os
 import ast
 
 
@@ -22,7 +23,8 @@ def search_github(
     query: str,
     lang: str = "python",
     max_results: int = 5,
-    fallback_to_curated: bool = True
+    fallback_to_curated: bool = True,
+    token: str | None = None
 ) -> list[dict]:
     """
     Search GitHub for code files matching query.
@@ -31,8 +33,10 @@ def search_github(
         query: Search term.
         lang: Language filter (default 'python').
         max_results: Maximum number of results.
-        fallback_to_curated: If True, return curated fallback on API failure
-                             (ensures demo continues). If False, return [].
+        fallback_to_curated: If True, return curated fallback on API failure.
+        token: GitHub personal access token. If None, reads GITHUB_TOKEN env var.
+               Authenticated requests get higher rate limits (10 req/min for code
+               search vs heavily restricted unauthenticated access).
 
     Returns list of dicts with keys:
         - repo: str           # "owner/repo"
@@ -43,12 +47,19 @@ def search_github(
     logger.info(f"START: query='{query}', lang='{lang}', max_results={max_results}, "
                 f"fallback={fallback_to_curated}")
 
-    # Curated fallback – safe entries with known correct raw URLs
+    # Resolve token: explicit arg > env var > None (unauthenticated)
+    resolved_token = token or os.environ.get("GITHUB_TOKEN")
+    if resolved_token:
+        logger.debug("Using authenticated request (token provided)")
+    else:
+        logger.debug("No token found — using unauthenticated request (tight rate limits)")
+
+    # Curated fallback — safe entries with known correct raw URLs
     curated = [
         {
             "repo": "psf/requests",
             "file_path": "requests/api.py",
-            "raw_url": "https://raw.githubusercontent.com/psf/requests/main/src/requests/api.py",
+            "raw_url": "https://raw.githubusercontent.com/psf/requests/main/requests/api.py",
             "description": "HTTP library – core API functions (get, post, etc.)"
         },
         {
@@ -66,19 +77,30 @@ def search_github(
     ][:max_results]
 
     try:
+        # Build headers — token enables higher rate limit tier
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        if resolved_token:
+            headers["Authorization"] = f"Bearer {resolved_token}"
+
         resp = requests.get(
             "https://api.github.com/search/code",
             params={
                 "q": f"{query}+language:{lang}",
                 "per_page": max_results
             },
-            headers={"Accept": "application/vnd.github.v3+json"},
+            headers=headers,
             timeout=10
         )
 
-        # Rate limit detection – more reliable
+        # Rate limit detection
         if resp.status_code in (403, 429) or resp.headers.get("X-RateLimit-Remaining") == "0":
-            logger.warning("Rate limit hit")
+            logger.warning(
+                f"Rate limit hit (status={resp.status_code}, "
+                f"remaining={resp.headers.get('X-RateLimit-Remaining')})"
+            )
             return curated if fallback_to_curated else []
 
         if resp.status_code != 200:
@@ -94,11 +116,9 @@ def search_github(
         for item in items[:max_results]:
             repo = item["repository"]["full_name"]
             path = item["path"]
-            # default_branch is always present in the repository object of search results
             branch = item["repository"].get("default_branch", "main")
             raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{path}"
 
-            # Better description: text match snippet → repo description → filename
             desc = (
                 item.get("text_matches", [{}])[0].get("fragment") or
                 item["repository"].get("description") or
