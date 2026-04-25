@@ -1,19 +1,16 @@
-
----
-
 ```markdown
 # SliceKit — A Lightweight Toolkit for LLM-Driven Code Reuse
 
 > 🏆 **Hackathon Judge Quick-Start**
 >
 > 1. Clone and install: `pip install -r requirements.txt`
-> 2. Run the demo: `python demo.py` (live) or `python demo.py --dry-run` (offline)
+> 2. Run the demo: `python demo.py` (always works — includes fallback if no GitHub token)
 > 3. Observe: Search → Fetch → Parse → Extract → LLM-ready snippet
 > 4. Try custom queries: `python demo.py "redis cache utils"`
 > 5. See verbose output: `python demo.py -v`
 >
-> ✅ The demo always works — fallback mode guarantees reliability even if GitHub’s API is unavailable.  
-> 🔑 To access live GitHub search (the API requires authentication), set `GITHUB_TOKEN` as described below.
+> ✅ **The demo runs 100% reliably** — demo.py wraps the framework with a curated fallback.  
+> 🔑 **For live GitHub search** you must provide a token – see [Authentication](#github-api-authentication-optional).
 
 ---
 
@@ -68,27 +65,31 @@ pip install -r requirements.txt
 
 ## GitHub API Authentication (Optional)
 
-SliceKit works **without any credentials** by using resilient fallback examples (curated, real code snippets). If you want live search that actually queries GitHub:
+**GitHub's Code Search API requires authentication.** Without a token, `search_github()` will receive a `401 Unauthorized` and return an empty list `[]`.
+
+For live search that actually queries GitHub, create a personal access token and set the environment variable:
 
 ```bash
-# Create a personal access token (scope: public_repo only)
+# Create a token with scope: public_repo (no other permissions needed)
 # https://github.com/settings/tokens
 export GITHUB_TOKEN=your_token_here
 python demo.py
 ```
 
-The `search_github()` function automatically reads `GITHUB_TOKEN` from the environment.  
+The framework automatically reads from `GITHUB_TOKEN`.  
 If you need to pass the token programmatically (e.g., inside a secure script), use:
 
 ```python
 import os
 from framework import search_github
 
-# Always read token from an environment variable – never hardcode it
+# Always read token from an environment variable – never hardcode secrets
 results = search_github("my query", token=os.getenv("GITHUB_TOKEN"))
 ```
 
 > 🔐 **Security note**: Tokens should **never** be written directly into source code or committed to a repository. Always use environment variables or a secret manager. The examples above show the safe pattern.
+
+> 📦 **No token?** The demo still works thanks to the fallback layer in `demo.py` (see below). The core framework functions return `[]` or `None` gracefully, which the demo script handles with curated examples.
 
 ---
 
@@ -98,17 +99,15 @@ results = search_github("my query", token=os.getenv("GITHUB_TOKEN"))
 python demo.py
 ```
 
-You’ll see a box‑drawn header, step‑by‑step output, timing breakdowns, and a final LLM‑ready snippet.
+You’ll see a box‑drawn header, step‑by‑step output, timing breakdowns, and a final LLM‑ready snippet. **The demo always produces output**, even without a GitHub token, because `demo.py` supplies pre‑selected real code snippets when the live search is unavailable.
 
-> 🔍 **About the Demo Search Results**
+> 🔍 **How demo resilience works**
 >
-> GitHub’s Code Search API (`/search/code`) requires authentication. Without a token it returns **401 Unauthorized**.  
-> When running `demo.py`:
-> - SliceKit **gracefully falls back** to curated example files that are real, runnable Python snippets — just pre‑selected for reliability.
-> - The query you see in the demo output is shown for context, but the results come from the fallback list.
-> - To activate **live search** with your own queries, set `GITHUB_TOKEN` as shown above.
->
-> **Why?** This fallback‑first design guarantees the demo **always works** for judges, while the architecture fully supports live search in production with proper authentication.
+> - `framework.py` functions follow a strict contract: they return `[]` or `None` on any failure (401, network error, etc.), **not** hardcoded fallbacks.
+> - `demo.py` checks the result of `search_github()`. If it’s empty, the demo script substitutes a curated list of working repositories — so the pipeline still demonstrates fetch, parse, and extract.
+> - This separation keeps the library functions clean and production‑ready (no hidden mock data), while the demo script guarantees a reliable showcase for judges.
+
+When a token is provided, `search_github()` performs a real search and the demo uses those live results.
 
 Example output (abbreviated):
 
@@ -142,16 +141,16 @@ def transfer_data(cursor, bigquery_client):
 
 ## Live Mode vs. Dry‑Run Mode
 
-SliceKit is built for real GitHub integration, but the demo includes additional flags for reliability and testing:
+The demo script provides several flags for flexibility:
 
 | Mode | Command | Behavior | Use Case |
 |------|---------|----------|----------|
-| **Live** | `python demo.py` | Calls GitHub API (requires token for search), fetches real files | Production use, live demos with internet |
-| **Dry‑Run** | `python demo.py --dry-run` | Uses cached mock data, no network | Offline testing, reproducible judge demos |
-| **Verbose** | `python demo.py -v` | Shows full result dict at end | Debugging, programmatic verification |
-| **Save Output** | `python demo.py -o glue.py` | Writes generated glue code to file | Integration testing |
+| **Live** | `python demo.py` | Calls GitHub API (requires token for real search), falls back to curated data if needed | Production demos with internet |
+| **Dry‑Run** | `python demo.py --dry-run` | Uses purely local mock data, no network at all | Offline testing, 100% reproducible output |
+| **Verbose** | `python demo.py -v` | Shows the full result dictionary at the end | Debugging and programmatic verification |
+| **Save Output** | `python demo.py -o glue.py` | Writes the extracted snippet to a file | Integration testing |
 
-> 💡 **Default is live mode**. The `--dry-run` flag is purely for convenience — the core `framework.py` functions always execute real logic when called directly (search falls back to curated list on 401).
+> 💡 **Default is live mode** (with automatic fallback when the API is unavailable). The `--dry-run` flag skips the network entirely for a completely deterministic run.
 
 ---
 
@@ -161,14 +160,16 @@ SliceKit is built for real GitHub integration, but the demo includes additional 
 
 | Step | Function | Responsibility | Returns |
 |------|----------|----------------|---------|
-| 1 | `search_github(query, lang="python", max_results=5, fallback_to_curated=True, token=None)` | Search GitHub with auth + fallback support | `list[dict]` with `repo`, `file_path`, `raw_url`, `description` |
+| 1 | `search_github(query, lang="python", max_results=5, token=None)` | Search GitHub (empty list if API fails) | `list[dict]` with `repo`, `file_path`, `raw_url`, `description` |
 | 2 | `get_file(raw_url)` | Download raw source from a `raw.githubusercontent.com` URL | `str` or `None` |
-| 3 | `slice_functions(code)` | Parse Python source and list all top‑level function signatures | `list[dict]` with `name`, `signature`, `docstring`, `line_start`, `line_end` |
+| 3 | `slice_functions(code)` | Parse Python source and list top‑level function signatures | `list[dict]` with `name`, `signature`, `docstring`, `line_start`, `line_end` |
 | 4 | `extract_function(code, func_name, slices)` | Extract one function’s full text plus relevant imports | `str` or `None` |
 
-> `token`: GitHub personal access token (optional). If `None`, reads `GITHUB_TOKEN` env var. Authenticated requests get access to live search with the standard rate limits (~30 req/min for code search).
+- `token`: optional GitHub PAT. If `None`, reads `GITHUB_TOKEN` env var. Without a valid token, `search_github()` returns `[]` (no access).
+- All line indices are **0‑based** (spec‑compliant).
+- The `slice_functions` return is fully compatible with `extract_function`.
 
-All functions share a `"slicekit"` logger, following a strict logging contract (see Design Philosophy).
+All functions share a `"slicekit"` logger (see Design Philosophy).
 
 ---
 
@@ -183,11 +184,11 @@ Every function returns standard Python types — lists of dicts, strings, `None`
 - Files: `framework.py`, `demo.py`
 
 ### 3. Graceful Degradation
-SliceKit **never raises exceptions** for expected failure modes (network issues, missing functions, bad syntax).
+SliceKit **never raises exceptions** for expected failure modes (network issues, missing functions, bad syntax). The framework functions return empty/None, while the demo script adds the resilience layer for presentation.
 
 | Situation | Return | Log Level | Example Log Message |
 |-----------|--------|-----------|----------------------|
-| Rate limit, 404, unparseable code | `[]` or `None` | `WARNING` | `API rate limit hit, returning fallback` |
+| API 401, 404, rate limit, unparseable code | `[]` or `None` | `WARNING` | `API returned 401` |
 | Unexpected exception | `[]` or `None` | `ERROR` | `FAILED: ConnectionError('timeout')` |
 | Success | valid data | `INFO` | `SUCCESS: found 3 results` |
 
@@ -217,7 +218,7 @@ HH:MM:SS | LEVEL     | slicekit.funcName | message
 ```
 SliceKit/
 ├── framework.py      # Core pipeline: search → fetch → slice → extract (REAL implementations)
-├── demo.py           # Orchestrator with CLI args + --dry-run mode + LLM simulation
+├── demo.py           # Orchestrator with CLI args, fallback, and LLM simulation
 ├── requirements.txt  # Only `requests>=2.28`
 └── README.md         # You are here
 ```
@@ -226,27 +227,27 @@ SliceKit/
 
 ## Troubleshooting
 
-### GitHub API returns 401 / Fallback mode activates
-Without a token, GitHub’s Code Search API returns `401 Unauthorized`. SliceKit automatically falls back to curated examples. Set `GITHUB_TOKEN` to enable real search.
+### “API returned 401” / “No results found” but demo still runs
+This is normal when no token is set. GitHub’s Code Search API requires authentication; `search_github()` returns `[]`. The demo script then switches to its curated fallback list, so the pipeline continues without interruption. To use live search, set `GITHUB_TOKEN`.
 
 ### Fallback results return 404 when fetching
-The hardcoded fallback entries may point to outdated repository paths. To fix:
-1. Edit `framework.py` and locate the `curated` list in `search_github()`
-2. Verify `file_path` matches the actual path in the GitHub repo
-3. Test the `raw_url` in your browser before committing
+The hardcoded fallback entries in `demo.py` may have outdated repository paths. To fix:
+1. Open `demo.py` and locate the `FALLBACK_RESULTS` list.
+2. Verify each `file_path` matches the actual path in the GitHub repository.
+3. Test each `raw_url` in your browser before committing.
 
-### Why does search show my query but return unrelated results?
-In fallback mode, SliceKit uses high‑quality example repos to guarantee demo success. The query is logged for context, but results come from a curated list when the GitHub API is unavailable. This is intentional design for hackathon reliability.
+### I set GITHUB_TOKEN but still see 401 or empty results
+- Ensure the token has the `public_repo` scope and has not expired.
+- Use the verbose flag (`-v`) to check the exact response details.
+- Check that the token is properly exported (`echo $GITHUB_TOKEN`).
 
 ### Rate limit warnings (`403` / `429`)
-When authenticated, GitHub’s Code Search API allows ~30 requests/minute. If you exceed that, SliceKit will fall back to curated examples. For unauthenticated requests, the API returns 401, not a rate limit error.
+When authenticated, GitHub’s Code Search API allows ~30 requests/minute. If you exceed that, `search_github()` returns `[]`. Unauthenticated requests get 401, not rate limits.
 
 ### Dry‑run mode shows different results than live
-`--dry-run` uses cached mock data for offline testing. Results are representative but not query‑specific. Use live mode for real GitHub results.
+`--dry-run` uses local mock data, independent of GitHub. The live mode (with token) performs real searches. Both modes demonstrate the full pipeline.
 
 ### Pipeline shows ❌ but you see extracted code?
 The demo continues on warnings. Check stdout above the final banner for partial results. The `success` field in the returned dict indicates final status.
 
 ---
-
-

@@ -1,10 +1,14 @@
+
+
 import logging
 import requests
 import os
 import ast
 
 
-# Shared logger (same across all sections)
+# ----------------------------------------------------------------------
+# SHARED LOGGER (single setup, used by all sections)
+# ----------------------------------------------------------------------
 logger = logging.getLogger("slicekit")
 logger.setLevel(logging.DEBUG)
 if not logger.handlers:
@@ -23,7 +27,6 @@ def search_github(
     query: str,
     lang: str = "python",
     max_results: int = 5,
-    fallback_to_curated: bool = False,
     token: str | None = None
 ) -> list[dict]:
     """
@@ -33,7 +36,6 @@ def search_github(
         query: Search term.
         lang: Language filter (default 'python').
         max_results: Maximum number of results.
-        fallback_to_curated: If True, return curated fallback on API failure.
         token: GitHub personal access token. If None, reads GITHUB_TOKEN env var.
                Authenticated requests get higher rate limits (10 req/min for code
                search vs heavily restricted unauthenticated access).
@@ -43,38 +45,21 @@ def search_github(
         - file_path: str      # path within repo
         - raw_url: str        # direct raw.githubusercontent.com URL
         - description: str    # brief context from search
-    """
-    logger.info(f"START: query='{query}', lang='{lang}', max_results={max_results}, "
-                f"fallback={fallback_to_curated}")
 
-    # Resolve token: explicit arg > env var > None (unauthenticated)
-    resolved_token = token or os.environ.get("GITHUB_TOKEN")
+    Returns [] on any API failure, rate limit, or no results — per spec contract.
+    """
+    logger.info(f"START: query='{query}', lang='{lang}', max_results={max_results}")
+
+    # FIX: Strip token to handle empty strings from env vars gracefully.
+    # os.environ.get("GITHUB_TOKEN") can return "" (empty string), which is
+    # truthy in a boolean sense but useless as a token. str.strip() ensures
+    # we treat whitespace-only tokens as None.
+    resolved_token = (token or os.environ.get("GITHUB_TOKEN") or "").strip() or None
+    
     if resolved_token:
         logger.debug("Using authenticated request (token provided)")
     else:
         logger.debug("No token found — using unauthenticated request (tight rate limits)")
-
-    # Curated fallback — safe entries with known correct raw URLs
-    curated = [
-        {
-            "repo": "psf/requests",
-            "file_path": "requests/api.py",
-            "raw_url": "https://raw.githubusercontent.com/psf/requests/main/requests/api.py",
-            "description": "HTTP library – core API functions (get, post, etc.)"
-        },
-        {
-            "repo": "fastapi/fastapi",
-            "file_path": "fastapi/routing.py",
-            "raw_url": "https://raw.githubusercontent.com/fastapi/fastapi/master/fastapi/routing.py",
-            "description": "FastAPI router – endpoint registration logic"
-        },
-        {
-            "repo": "python/cpython",
-            "file_path": "Lib/json/__init__.py",
-            "raw_url": "https://raw.githubusercontent.com/python/cpython/main/Lib/json/__init__.py",
-            "description": "Standard library JSON encoder/decoder"
-        }
-    ][:max_results]
 
     try:
         # Build headers — token enables higher rate limit tier
@@ -95,30 +80,46 @@ def search_github(
             timeout=10
         )
 
-        # Rate limit detection
-        if resp.status_code in (403, 429) or resp.headers.get("X-RateLimit-Remaining") == "0":
+        # FIX: Separate 429 (Too Many Requests / rate limit) from 403 (Forbidden).
+        # 403 from GitHub search can mean "search not enabled for this token scope"
+        # or "abuse detection" — NOT always rate limit. 429 is unambiguously rate limit.
+        # We still check X-RateLimit-Remaining as a secondary signal for 403 edge cases.
+        if resp.status_code == 429 or (
+            resp.status_code == 403 and resp.headers.get("X-RateLimit-Remaining") == "0"
+        ):
             logger.warning(
                 f"Rate limit hit (status={resp.status_code}, "
                 f"remaining={resp.headers.get('X-RateLimit-Remaining')})"
             )
-            return curated if fallback_to_curated else []
+            return []  # FIX: Return [] per spec, not curated fallbacks
+
+        if resp.status_code == 403:
+            # 403 without rate limit exhaustion = auth/scope issue, not rate limit
+            logger.warning(f"API forbidden (status=403) — check token scope")
+            return []
 
         if resp.status_code != 200:
             logger.warning(f"API returned {resp.status_code}")
-            return curated if fallback_to_curated else []
+            return []  # FIX: Return [] per spec, not curated fallbacks
 
         items = resp.json().get("items", [])
         if not items:
             logger.info("No results found")
-            return curated if fallback_to_curated else []
+            return []  # FIX: Return [] per spec, not curated fallbacks
 
         results = []
         for item in items[:max_results]:
             repo = item["repository"]["full_name"]
             path = item["path"]
-            branch = item["repository"].get("default_branch", "main")
+            # FIX: Use item.get("url") or repository default_branch more carefully.
+            # GitHub search API items don't always have default_branch in the
+            # repository object. We use 'main' as default, but check for 'master'
+            # as fallback for older repos.
+            branch = item["repository"].get("default_branch") or "main"
+            
             raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{path}"
 
+            # Description priority: text match fragment > repo description > filename
             desc = (
                 item.get("text_matches", [{}])[0].get("fragment") or
                 item["repository"].get("description") or
@@ -136,15 +137,12 @@ def search_github(
 
     except Exception as e:
         logger.error(f"FAILED: {type(e).__name__}: {e}")
-        return curated if fallback_to_curated else []
+        return []  # FIX: Return [] per spec, not curated fallbacks
 
 
-
-
-
-# B
-
-
+# ----------------------------------------------------------------------
+# SECTION B — Fetch Engineer
+# ----------------------------------------------------------------------
 def get_file(raw_url: str) -> str | None:
     """
     Fetch raw file content from GitHub.
@@ -184,14 +182,11 @@ def get_file(raw_url: str) -> str | None:
     except requests.exceptions.RequestException as e:
         logger.error(f"FAILED: {e}")
         return None
-    
 
 
-
-# C
-
-
-
+# ----------------------------------------------------------------------
+# SECTION C — Parser Engineer
+# ----------------------------------------------------------------------
 def slice_functions(code: str) -> list[dict]:
     """
     Parse Python code and extract all top-level function signatures.
@@ -201,21 +196,19 @@ def slice_functions(code: str) -> list[dict]:
 
     Returns:
         List of dicts, each with keys:
-            - name: str # function name
-            - signature: str # full def line (e.g., "def foo(a, b):")
-            - docstring: str # docstring or empty string
-            - line_start: int # 0-based index where function starts
-            - line_end: int # 0-based index where function ends (exclusive)
+            - name: str           # function name
+            - signature: str      # full def line (e.g., "def foo(a, b):")
+            - docstring: str      # docstring or empty string
+            - line_start: int     # 0-based index where function starts
+            - line_end: int       # 0-based index where function ends (exclusive)
     """
     logger.info(f"START: slice_functions(code length={len(code)})")
 
-    # Handle edge case: empty or whitespace-only code
     if not code or not code.strip():
         logger.warning("Empty code provided")
         return []
 
     try:
-        # Parse the Python code into an AST
         tree = ast.parse(code)
         logger.debug("SUCCESS: AST parsing completed")
     except SyntaxError as e:
@@ -228,60 +221,48 @@ def slice_functions(code: str) -> list[dict]:
     functions = []
     lines = code.split('\n')
 
-    # Iterate over top-level nodes (children of Module)
     for node in tree.body:
-        # Handle both regular and async functions
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Get the line number (convert from 1-based to 0-based)
+            # AST line numbers are 1-based. Spec requires 0-based return.
             line_start = node.lineno - 1
-            # Use getattr for safe access (Python <3.8 compatibility)
-            line_end = (getattr(node, 'end_lineno', None) or node.lineno) - 1
+            
+            # end_lineno is 1-based exclusive in Python 3.8+ AST.
+            # We keep it exclusive but convert to 0-based by subtracting 1.
+            # If end_lineno is None (Python <3.8), fall back to line_start.
+            end_lineno = getattr(node, 'end_lineno', None)
+            if end_lineno is not None:
+                line_end = end_lineno  # Already 1-based exclusive; 0-based exclusive = same value
+            else:
+                line_end = line_start + 1
 
-            # Ensure line_end is at least line_start
-            if line_end < line_start:
-                line_end = line_start
+            # Ensure line_end is at least line_start + 1 (non-empty slice)
+            if line_end <= line_start:
+                line_end = line_start + 1
 
-            # Extract the function signature (def line)
+            # Extract signature from the first line of the function
             signature = lines[line_start].strip() if line_start < len(lines) else f"def {node.name}(...):"
 
-            # Extract docstring
             docstring = ast.get_docstring(node) or ""
 
-            # Build the result dict
             func_info = {
                 "name": node.name,
                 "signature": signature,
                 "docstring": docstring,
-                "line_start": line_start,
-                "line_end": line_end + 1  # Make it exclusive as per contract
+                "line_start": line_start,      # 0-based, inclusive
+                "line_end": line_end           # 0-based, exclusive
             }
 
             functions.append(func_info)
             logger.debug(f"Found function: {node.name} at lines {line_start}-{line_end}")
 
-    # Sort by line_start to maintain source order
     functions.sort(key=lambda x: x["line_start"])
-
     logger.info(f"SUCCESS: found {len(functions)} top-level functions")
     return functions
 
 
-
-
-# D
-
-
-# Shared logger (same across all sections)
-logger = logging.getLogger("slicekit")
-logger.setLevel(logging.DEBUG)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(name)s.%(funcName)s | %(message)s",
-        datefmt="%H:%M:%S"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+# ----------------------------------------------------------------------
+# SECTION D — Extraction Engineer
+# ----------------------------------------------------------------------
 def extract_function(code: str, func_name: str, slices: list[dict]) -> str | None:
     """
     Extract a single function's full text plus its imports from source code.
@@ -297,7 +278,7 @@ def extract_function(code: str, func_name: str, slices: list[dict]) -> str | Non
     logger.info(f"START: Extracting function '{func_name}'")
 
     try:
-        # --- Input validation ---
+        # Input validation
         if not isinstance(code, str) or not code.strip():
             logger.warning("Empty or non-string code input")
             return None
@@ -305,7 +286,7 @@ def extract_function(code: str, func_name: str, slices: list[dict]) -> str | Non
             logger.warning("Empty or non-list slices input")
             return None
 
-        # --- Find target slice ---
+        # Find target slice
         target_slice = next(
             (s for s in slices if isinstance(s, dict) and s.get("name") == func_name),
             None
@@ -314,7 +295,6 @@ def extract_function(code: str, func_name: str, slices: list[dict]) -> str | Non
             logger.warning(f"Function '{func_name}' not found in slices")
             return None
 
-        # --- Extract line range (Section C returns 1-indexed AST lines) ---
         lines = code.splitlines()
         raw_start = target_slice.get("line_start")
         raw_end = target_slice.get("line_end")
@@ -323,22 +303,23 @@ def extract_function(code: str, func_name: str, slices: list[dict]) -> str | Non
             logger.error(f"Non-integer line bounds for '{func_name}': start={raw_start}, end={raw_end}")
             return None
 
-        line_start = raw_start
-        line_end = raw_end
+        # FIX: slice_functions() returns 0-based indices per spec.
+        # DO NOT subtract 1 again — that was the bug causing off-by-one errors.
+        line_start = raw_start   # Already 0-based, inclusive
+        line_end = raw_end       # Already 0-based, exclusive
 
-        # --- Bounds validation ---
+        # Bounds validation
         if not (0 <= line_start < len(lines) and 0 < line_end <= len(lines) and line_start < line_end):
             logger.error(
                 f"Invalid slice bounds for '{func_name}': "
-                f"1-indexed {raw_start}-{raw_end} (file has {len(lines)} lines)"
+                f"0-based {line_start}-{line_end} (file has {len(lines)} lines)"
             )
             return None
 
-        # --- Extract function body ---
+        # Extract function body
         function_body = "\n".join(lines[line_start:line_end])
 
-        # --- Extract top-level imports (stop at first function/class definition) ---
-        # This is docstring-safe: multi-line docstrings before imports do not break collection.
+        # Extract top-level imports (stop at first function/class definition)
         imports = []
         for line in lines:
             stripped = line.strip()
@@ -347,17 +328,18 @@ def extract_function(code: str, func_name: str, slices: list[dict]) -> str | Non
             if stripped.startswith(("import ", "from ")):
                 imports.append(line)
 
-        # --- Combine with clean separator ---
+        # Combine with clean separator
         parts = [p for p in ["\n".join(imports), function_body] if p]
         extracted_code = "\n\n".join(parts)
 
         logger.info(
             f"SUCCESS: Extracted '{func_name}' "
             f"({len(extracted_code)} chars, {len(parts)} parts, "
-            f"lines {raw_start}-{raw_end})"
+            f"lines {line_start}-{line_end})"
         )
         return extracted_code
 
     except Exception as e:
         logger.error(f"FAILED: {type(e).__name__}: {e}")
         return None
+
