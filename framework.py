@@ -73,7 +73,7 @@ def search_github(
         resp = requests.get(
             "https://api.github.com/search/code",
             params={
-                "q": f"{query}+language:{lang}",
+                "q": f"{query} language:{lang}",
                 "per_page": max_results
             },
             headers=headers,
