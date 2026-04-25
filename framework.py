@@ -48,7 +48,7 @@ def search_github(
         {
             "repo": "psf/requests",
             "file_path": "requests/api.py",
-            "raw_url": "https://raw.githubusercontent.com/psf/requests/main/requests/api.py",
+            "raw_url": "https://raw.githubusercontent.com/psf/requests/main/src/requests/api.py",
             "description": "HTTP library – core API functions (get, post, etc.)"
         },
         {
