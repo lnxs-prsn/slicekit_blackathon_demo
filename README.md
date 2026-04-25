@@ -252,11 +252,4 @@ The demo continues on warnings. Check stdout above the final banner for partial 
 
 ---
 
-## Future Improvements
 
-- **Caching layer:** Cache fetched files to speed repeated searches
-- **Multi‑language support:** Extend `lang` parameter to JavaScript, Go, etc.
-- **Smarter import extraction:** Resolve which imports are actually used in the extracted function
-- **Real LLM integration:** Add a Claude/GPT‑based glue writer module (Section E is a placeholder for that)
-
----
