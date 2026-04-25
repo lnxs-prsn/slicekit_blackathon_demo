@@ -34,7 +34,7 @@ if __name__ == "__main__":
             functions = slice_functions(code)
             for f in functions:
                 sig = f['signature'].replace('def ', '')
-                print(f"  - {f['name']}{sig}")
+                print(f"  - {sig}")
 
             if functions:
                 print("\n=== STEP 4: Extracting function ===")
