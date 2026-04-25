@@ -1,6 +1,3 @@
-You're absolutely right — the phrasing "higher rate limits" implies that there’s some level of access without a token, just at a lower rate. In reality, without a token GitHub’s `/search/code` endpoint returns **401** (no access at all), not a lower rate limit. SliceKit’s fallback is a hardcoded curated list, not degraded access. The documentation should make that distinction clear.
-
-Below is the **final, corrected README.md** with all misleading phrasing removed. The token now enables **access** (with rate limits), and the fallback is explicitly presented as an alternative to that access, not a lower tier of the same service.
 
 ---
 
