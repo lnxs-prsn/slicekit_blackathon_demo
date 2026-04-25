@@ -154,11 +154,11 @@ def _mock_get_file(raw_url):
 def run_pipeline(
     query: str,
     max_results: int = 3,
-    target_function: str = None,
+    target_function: str | None=None,
     fallback_first: bool = False,
     verbose: bool = False,
     dry_run: bool = False,
-    output_path: str = None
+    output_path: str | None=None
 ) -> dict:
     """
     Execute the full SliceKit pipeline and return results.
@@ -438,7 +438,7 @@ def _format_dict(d: dict, indent: int = 0) -> str:
     return "\n".join(lines)
 
 
-def _simulate_llm_glue(func_name: str, snippet: str, func_info: dict) -> str:
+def _simulate_llm_glue(func_name: str, snippet: str, func_info: dict|None) -> str:
     """
     Simulate what a small LLM would generate as glue code.
     
