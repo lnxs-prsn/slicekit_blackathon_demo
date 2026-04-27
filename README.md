@@ -16,9 +16,13 @@
 
 ## The Problem
 
-Modern coding tasks often require non-trivial logic: ETL pipelines, finicky API integrations, data transforms. Large models (GPT‑4, Claude) handle these well. But small, fast, local, or budget LLMs frequently produce hallucinated imports, broken syntax, or insecure shortcuts when asked to write more than a few lines.
+Modern coding tasks often require non-trivial logic: ETL pipelines, finicky API integrations, data transforms.
+Large models (GPT‑4, Claude) handle these well.
+But small, fast, local, or budget LLMs frequently produce hallucinated imports, broken syntax, or insecure shortcuts when asked to write more than a few lines.
 
-**The insight:** GitHub already contains millions of high‑quality, tested, documented code snippets. Small LLMs *can* read code descriptions, select relevant functions, and write thin glue code that ties them together. What they can’t do is efficiently search, fetch, parse, and extract that code in a reliable, repeatable way.
+**The insight:** GitHub already contains millions of high‑quality, tested, documented code snippets.
+Small LLMs *can* read code descriptions, select relevant functions, and write thin glue code that ties them together.
+What they can’t do is efficiently search, fetch, parse, and extract that code in a reliable, repeatable way.
 
 ---
 
