@@ -18,7 +18,8 @@
 
 Modern coding tasks often require non-trivial logic: ETL pipelines, finicky API integrations, data transforms.
 Large models (GPT‑4, Claude) handle these well.
-But small, fast, local, or budget LLMs frequently produce hallucinated imports, broken syntax, or insecure shortcuts when asked to write more than a few lines.
+But small, fast, local, or budget LLMs frequently produce hallucinated imports, broken syntax,
+or insecure shortcuts when asked to write more than a few lines.
 
 **The insight:** GitHub already contains millions of high‑quality, tested, documented code snippets.
 Small LLMs *can* read code descriptions, select relevant functions, and write thin glue code that ties them together.
@@ -28,7 +29,9 @@ What they can’t do is efficiently search, fetch, parse, and extract that code 
 
 ## How SliceKit Solves It
 
-SliceKit implements a four‑stage pipeline that converts a natural language request into a curated, minimal, copy‑paste‑ready Python snippet *without* requiring the LLM to know anything about GitHub’s API, AST parsing, or file I/O.
+SliceKit implements a four‑stage pipeline that converts a natural language request into a curated, minimal,
+copy‑paste‑ready Python snippet *without* requiring the LLM to know anything about GitHub’s API, AST parsing,
+or file I/O.
 
 ```
 User Request
